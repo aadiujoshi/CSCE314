@@ -99,21 +99,69 @@ parseTokens tracking (cur:remaining)
 
 parseExprString :: String -> Either String Expr
 parseExprString s = 
-    -- let tokens =   -- First, convert string to tokens
-    case parseExpr (tokenize s) of
-        Left err -> Left err  -- Propagate parse error
-        Right (expr, []) -> Right expr  -- Success: no tokens left
+    let tokens = tokenize s 
+    in case parseAddSub tokens of
+        Left err -> Left err 
+        Right (expr, []) -> Right expr
         Right (_, remaining) -> Left $ "Unexpected tokens at end: " ++ show remaining
 
--- HINT: define helpers (signatures given; bodies are TODO)
-parseExpr :: [Token] -> Either String (Expr, [Token])
-parseExpr = undefined -- TODO
+parseAddSub :: [Token] -> Either String (Expr, [Token])
+parseAddSub tokens = 
+    case parseMultDiv tokens of
+        Left err -> Left err  
+        Right (leftExpr, rest) -> parseAddSubRest leftExpr rest
+  where
+    parseAddSubRest :: Expr -> [Token] -> Either String (Expr, [Token])
+    parseAddSubRest leftExpr [] = Right (leftExpr, [])  
+    
+    parseAddSubRest leftExpr (TPlus:rest) = 
+        case parseMultDiv rest of
+            Left err -> Left err
+            Right (rightExpr, rest2) -> 
+                parseAddSubRest (Bin Add leftExpr rightExpr) rest2
+    
+    parseAddSubRest leftExpr (TMinus:rest) = 
+        case parseMultDiv rest of
+            Left err -> Left err
+            Right (rightExpr, rest2) -> 
+                parseAddSubRest (Bin Sub leftExpr rightExpr) rest2
+    parseAddSubRest leftExpr rest = Right (leftExpr, rest)
 
-parseTerm :: [Token] -> Either String (Expr, [Token])
-parseTerm = undefined -- TODO
+parseMultDiv :: [Token] -> Either String (Expr, [Token])
+parseMultDiv tokens = 
+    case parseConstant tokens of
+        Left err -> Left err
+        Right (leftExpr, rest) -> parseMultDivRest leftExpr rest
+  where
+    parseMultDivRest :: Expr -> [Token] -> Either String (Expr, [Token])
+    parseMultDivRest leftExpr [] = Right (leftExpr, [])
+    
+    parseMultDivRest leftExpr (TMul:rest) = 
+        case parseConstant rest of
+            Left err -> Left err
+            Right (rightExpr, rest2) -> 
+                parseMultDivRest (Bin Mul leftExpr rightExpr) rest2
+    
+    parseMultDivRest leftExpr (TDiv:rest) = 
+        case parseConstant rest of
+            Left err -> Left err
+            Right (rightExpr, rest2) -> 
+                parseMultDivRest (Bin Div leftExpr rightExpr) rest2
+    parseMultDivRest leftExpr rest = Right (leftExpr, rest)
 
-parseFactor :: [Token] -> Either String (Expr, [Token])
-parseFactor = undefined  -- TODO
+parseConstant :: [Token] -> Either String (Expr, [Token])
+parseConstant [] = Left "Unexpected end of input in factor"
+
+parseConstant (TInt n : rest) = Right (Lit n, rest)
+parseConstant (TLParen : rest) = 
+    case parseAddSub rest of 
+        Left err -> Left err
+        Right (expr, TRParen : rest2) -> 
+            Right (expr, rest2)
+        Right (_, rest2) -> 
+            Left "Unclosed parenthesis"
+
+parseConstant (tok : _) = Left $ "Unexpected token in factor: " ++ show tok
 
 -- -------------------------------------------------------------------------
 -- 3) PRETTY-PRINT (Prefix)
@@ -125,7 +173,21 @@ parseFactor = undefined  -- TODO
 -- -------------------------------------------------------------------------
 
 toPrefix :: Expr -> String
-toPrefix = undefined  -- TODO
+toPrefix (Lit num) = show num
+toPrefix (Bin operation left right) =
+    opString ++ " " ++ leftStr ++ " " ++ rightStr
+    where
+        opString = case operation of
+            Add -> "add"
+            Sub -> "sub"
+            Mul -> "mult"
+            Div -> "div"
+
+        leftStr  = wrapParen left
+        rightStr = wrapParen right
+
+        wrapParen (Lit n) = show n
+        wrapParen expr    = "(" ++ toPrefix expr ++ ")"
 
 -- -------------------------------------------------------------------------
 -- 4) EVALUATION (Safe with Either)
@@ -135,7 +197,18 @@ toPrefix = undefined  -- TODO
 -- -------------------------------------------------------------------------
 
 eval :: Expr -> Either String Integer
-eval = undefined  -- TODO
+eval (Lit x) = Right x
+eval (Bin operation left right) = 
+    case (eval left, eval right) of
+        (Left lerr, _) -> Left lerr
+        (_, Left rerr) -> Left rerr
+        (Right l2, Right r2) -> case operation of
+            Div -> case r2 of
+                0 -> Left "Division by zero"
+                _ -> Right (l2 `div` r2)
+            Mul -> Right (l2 * r2)
+            Add -> Right (l2 + r2)
+            Sub -> Right (l2 - r2)
 
 -- -------------------------------------------------------------------------
 -- 5) CONVENIENCE WRAPPERS (For GHCi testing)
@@ -144,11 +217,43 @@ eval = undefined  -- TODO
 -- -------------------------------------------------------------------------
 
 run :: String -> Either String Integer
-run = undefined  -- TODO: parseExprString then eval
+run s = do
+    expr <- parseExprString s  
+    eval expr                  
 
 showPrefix :: String -> Either String String
-showPrefix = undefined  -- TODO: parseExprString then toPrefix
+showPrefix s = do
+    expr <- parseExprString s
+    return (toPrefix expr)
 
 -- -------------------------------------------------------------------------
 -- End of Starter
 -- -------------------------------------------------------------------------
+-- module HW_Expr_Tests where
+-- import HW_Expr_solution
+
+ok :: (Eq a, Show a) => String -> a -> a -> IO ()
+ok name got want =
+  putStrLn (name ++ ": " ++ if got == want then "OK" else "FAIL, got " ++ show got ++ ", want " ++ show want)
+
+runTests :: IO ()
+runTests = do
+  ok "prefix 1"
+     (showPrefix "2 * 5 + 9")
+     (Right "add (mult 2 5) 9")
+
+  ok "eval 1"
+     (run "2 * 5 + 9")
+     (Right 19)
+
+  ok "prefix 2"
+     (showPrefix "12 + (30 / 5) * 2")
+     (Right "add 12 (mult (div 30 5) 2)")
+
+  ok "eval 2"
+     (run "12 + (30 / 5) * 2")
+     (Right 24)
+
+  ok "div by zero"
+     (run "8 / (3 - 3)")
+     (Left "Division by zero")
