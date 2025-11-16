@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Launch App",
+            "request": "launch",
+            "mainClass": "App",
+            "projectName": "java_testing",
+            "cwd": "${workspaceFolder}",
+            "args": [],
+            "vmArgs": [],
+            "preLaunchTask": "java: compile"
+        }
+    ]
+}
